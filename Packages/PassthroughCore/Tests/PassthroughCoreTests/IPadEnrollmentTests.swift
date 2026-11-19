@@ -24,6 +24,26 @@ final class IPadEnrollmentTests: XCTestCase {
         XCTAssertNil(IPadEnrollment.Invitation(url: URL(string: "https://example.com/pair-ipad?v=1")!))
     }
 
+    func testMacInvitationKeepsRoleAndNumericEndpoint() throws {
+        let invitation = IPadEnrollment.Invitation(clientID: "mac-1", name: "My Mac",
+            certSHA256: String(repeating: "ab", count: 32), kind: .mac, host: "172.20.10.13", port: 54321)
+        let parsed = try XCTUnwrap(IPadEnrollment.Invitation(url: invitation.url))
+        XCTAssertEqual(parsed.kind, .mac)
+        XCTAssertEqual(parsed.host, "172.20.10.13")
+        XCTAssertEqual(parsed.port, 54321)
+        XCTAssertEqual(parsed.secret, invitation.secret)
+        XCTAssertEqual(IPadEnrollment.Invitation(url: IPadEnrollment.Invitation(clientID: "ipad", name: "iPad",
+            certSHA256: invitation.certSHA256).url)?.kind, .ipad)
+    }
+
+    func testAmbiguousOrIncompleteEndpointsAreRejected() {
+        let invitation = IPadEnrollment.Invitation(clientID: "mac", name: "Mac", certSHA256: String(repeating: "a", count: 64), kind: .mac)
+        let base = invitation.url.absoluteString
+        for extra in ["&h=127.0.0.1", "&p=12", "&h=127.0.0.1&p=0", "&h=example.com&p=443", "&c=other", "&e=nan"] {
+            XCTAssertNil(IPadEnrollment.Invitation(url: URL(string: base + extra)!), extra)
+        }
+    }
+
     func testProofNeedsTheSecretAndTheNonce() {
         let secret = WirelessLink.randomBytes(32), nonce = WirelessLink.randomBytes(32)
         let proof = IPadEnrollment.proof(secret: secret, nonce: nonce)
@@ -81,5 +101,26 @@ final class IPadEnrollmentTests: XCTestCase {
             return XCTFail("a wrong secret paired")
         }
         XCTAssertTrue(kept.get().isEmpty)
+    }
+
+    func testMacCanEnrollWithoutBonjourAndStillRejectsWrongSecret() throws {
+        let identity = try makeTestIdentity()
+        var invitation = IPadEnrollment.Invitation(clientID: "mac-\(UUID().uuidString.prefix(6))", name: "Mac",
+            certSHA256: identity.fingerprint, kind: .mac)
+        let kept = Locked<[UpstreamPhone]>([])
+        let listener = try listen(invitation, identity: identity, kept: kept)
+        defer { listener.stop() }
+        invitation.host = "127.0.0.1"
+        invitation.port = try XCTUnwrap(listener.port)
+        var forged = invitation
+        forged.secret = WirelessLink.randomBytes(32)
+        guard case .failure(.refused) = enroll(forged, token: PairingToken.generate(), linkKey: WirelessLink.randomBytes(32)) else {
+            return XCTFail("a wrong secret enrolled over the direct endpoint")
+        }
+        XCTAssertTrue(kept.get().isEmpty)
+        let token = PairingToken.generate(), linkKey = WirelessLink.randomBytes(32)
+        guard case .success = enroll(invitation, token: token, linkKey: linkKey) else { return XCTFail("direct TLS enrollment failed") }
+        XCTAssertEqual(kept.get().first?.token, token)
+        XCTAssertEqual(kept.get().first?.linkKey, linkKey)
     }
 }

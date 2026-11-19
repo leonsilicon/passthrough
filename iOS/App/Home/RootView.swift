@@ -166,6 +166,9 @@ struct RootView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(model).environmentObject(lock)
         }
+        .sheet(item: $model.pendingMacEnrollment) { request in
+            WirelessMacEnrollmentView(invitation: request.invitation).environmentObject(model)
+        }
     }
 
     var body: some View {
@@ -210,6 +213,56 @@ struct RootView: View {
             }
             #endif
         }
+    }
+}
+
+/// Explicit approval before granting this Mac access to the phone's relay.
+/// The invitation pins TLS; the existing enrollment challenge proves its secret.
+private struct WirelessMacEnrollmentView: View {
+    let invitation: IPadEnrollment.Invitation
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var working = false
+    @State private var message: String?
+    @State private var paired = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Image(systemName: "laptopcomputer").font(.system(size: 52))
+                Text(paired ? "Mac paired" : "Pair with \(invitation.name)?").font(.title2.bold())
+                Text(paired ? "Sharing can keep running while you use other apps or lock your iPhone."
+                           : "Allow this Mac to use your iPhone's internet over Personal Hotspot. This pairing grants internet sharing only.")
+                    .multilineTextAlignment(.center)
+                if let message { Text(message).font(.callout).foregroundStyle(.secondary) }
+                if working { ProgressView("Pairing securely…") }
+                if paired {
+                    Button("Done") { dismiss() }.buttonStyle(.borderedProminent)
+                } else {
+                    Button("Pair and start sharing") {
+                        working = true
+                        Task {
+                            switch await model.addIPad(invitation) {
+                            case .success:
+                                model.wireless = true
+                                model.peerToPeer = false
+                                model.hosting = .background
+                                if model.state.isActive { model.restartIfRunning() } else { model.start() }
+                                paired = true
+                            case .failure(let error): message = error.localizedDescription
+                            }
+                            working = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(working || invitation.isExpired)
+                    Button("Cancel", role: .cancel) { dismiss() }.disabled(working)
+                }
+            }
+            .padding(28)
+            .navigationTitle("Wireless setup")
+        }
+        .interactiveDismissDisabled(working)
     }
 }
 

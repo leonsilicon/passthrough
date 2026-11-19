@@ -53,6 +53,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairingCode: (code: String, expiry: Date)?
     /// The code shown was withdrawn after too many wrong guesses (by whichever process checks codes).
     @Published private(set) var pairingCodeWithdrawn = false
+    struct MacEnrollment: Identifiable {
+        var invitation: IPadEnrollment.Invitation
+        var id: String { invitation.clientID }
+    }
+    @Published var pendingMacEnrollment: MacEnrollment?
     @Published private(set) var radio: String?
     @Published private(set) var batteryLevel: Double?
     /// "Cellular only" is on but the phone is on Wi-Fi, so Macs get its Wi-Fi.
@@ -291,9 +296,10 @@ final class AppModel: ObservableObject {
     /// paired only once the iPad has taken them; until then an earlier pairing
     /// of the same iPad keeps working.
     func addIPad(_ invitation: IPadEnrollment.Invitation) async -> Result<Void, IPadEnrollment.EnrollmentError> {
-        guard let new = registry.prepareClient(id: invitation.clientID, name: invitation.name, kind: .ipad,
+        guard !invitation.isExpired else { return .failure(.expired) }
+        guard let new = registry.prepareClient(id: invitation.clientID, name: invitation.name, kind: invitation.kind,
                                                certificateSHA256: invitation.certSHA256, linkKey: WirelessLink.randomBytes(32)) else {
-            return .failure(.refused("that code names a device already paired as a Mac"))
+            return .failure(.refused("that code names a device already paired with another role"))
         }
         let registry = self.registry
         var result: Result<Void, IPadEnrollment.EnrollmentError> = await withCheckedContinuation { continuation in

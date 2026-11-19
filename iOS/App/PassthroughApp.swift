@@ -14,7 +14,13 @@ struct PassthroughApp: App {
             LockGate { RootView() }
                 // Here, not in RootView: that's built only after the first
                 // unlock, and a cold launch from a widget would lose its link.
-                .onOpenURL { PendingLinks.shared.open(AppLink(url: $0)) }
+                .onOpenURL { url in
+                    if let invitation = IPadEnrollment.Invitation(url: url), invitation.kind == .mac {
+                        model.pendingMacEnrollment = .init(invitation: invitation)
+                    } else {
+                        PendingLinks.shared.open(AppLink(url: url))
+                    }
+                }
                 .tint(PTColor.tintText)
                 .environmentObject(model)
                 .environmentObject(lock)

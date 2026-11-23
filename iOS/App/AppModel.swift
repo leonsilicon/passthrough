@@ -53,6 +53,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairingCode: (code: String, expiry: Date)?
     /// The code shown was withdrawn after too many wrong guesses (by whichever process checks codes).
     @Published private(set) var pairingCodeWithdrawn = false
+    struct MacEnrollment: Identifiable {
+        var invitation: IPadEnrollment.Invitation
+        var id: String { invitation.clientID }
+    }
+    @Published var pendingMacEnrollment: MacEnrollment?
     @Published private(set) var radio: String?
     @Published private(set) var batteryLevel: Double?
     /// "Cellular only" is on but the phone is on Wi-Fi, so Macs get its Wi-Fi.
@@ -69,6 +74,11 @@ final class AppModel: ObservableObject {
     @AppStorage(SharedKeys.controlPort, store: AppModel.groupDefaults) var controlPort = Int(PassthroughProtocol.defaultControlPort)
     @AppStorage(SharedKeys.wireless, store: AppModel.groupDefaults) var wireless = false
     @AppStorage(SharedKeys.peerToPeer, store: AppModel.groupDefaults) var peerToPeer = false
+    @AppStorage("travelRouterAddress", store: AppModel.groupDefaults) private var travelRouterAddress = ""
+    @AppStorage("travelRouterMac", store: AppModel.groupDefaults) private var travelRouterMac = ""
+    var travelRouter: TravelRouterLink? {
+        TravelRouterLink(address: travelRouterAddress, macClientID: travelRouterMac)
+    }
     @AppStorage("hosting", store: AppModel.groupDefaults) var hostingRaw = Hosting.background.rawValue
     var hosting: Hosting {
         get { Hosting(rawValue: hostingRaw) ?? .background }
@@ -177,6 +187,7 @@ final class AppModel: ObservableObject {
         options.allowUDP = allowUDP
         options.wireless = wireless
         options.peerToPeer = peerToPeer
+        options.travelRouter = wireless && !ThisDevice.isPad ? travelRouter : nil
         let host = activeHost
         Task {
             do {
@@ -193,6 +204,14 @@ final class AppModel: ObservableObject {
         state = .stopping
         let host = activeHost
         Task { await host.stop() }
+    }
+
+    func setTravelRouter(_ link: TravelRouterLink?) {
+        guard link != travelRouter else { return }
+        objectWillChange.send()
+        travelRouterAddress = link?.address ?? ""
+        travelRouterMac = link?.macClientID ?? ""
+        restartIfRunning()
     }
 
     /// Applies a setting that only takes effect at start: restarts a running proxy.
@@ -291,9 +310,10 @@ final class AppModel: ObservableObject {
     /// paired only once the iPad has taken them; until then an earlier pairing
     /// of the same iPad keeps working.
     func addIPad(_ invitation: IPadEnrollment.Invitation) async -> Result<Void, IPadEnrollment.EnrollmentError> {
-        guard let new = registry.prepareClient(id: invitation.clientID, name: invitation.name, kind: .ipad,
+        guard !invitation.isExpired else { return .failure(.expired) }
+        guard let new = registry.prepareClient(id: invitation.clientID, name: invitation.name, kind: invitation.kind,
                                                certificateSHA256: invitation.certSHA256, linkKey: WirelessLink.randomBytes(32)) else {
-            return .failure(.refused("that code names a device already paired as a Mac"))
+            return .failure(.refused("that code names a device already paired with another role"))
         }
         let registry = self.registry
         var result: Result<Void, IPadEnrollment.EnrollmentError> = await withCheckedContinuation { continuation in

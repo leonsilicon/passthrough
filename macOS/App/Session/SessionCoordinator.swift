@@ -42,6 +42,7 @@ final class SessionCoordinator: ObservableObject {
     @Published private(set) var connectedSince: Date?
     @Published private(set) var tunnelInterface: String?
     @Published private(set) var helperAvailability: HelperClient.Availability = .notRegistered
+    @Published private(set) var wirelessEnrollmentStatus = "Preparing wireless pairing…"
     @Published private(set) var pairingError: String?
     @Published private(set) var pairingInFlight = false
     /// The outcome of the last "Register again", for Settings.
@@ -100,6 +101,13 @@ final class SessionCoordinator: ObservableObject {
         didSet {
             UserDefaults.standard.set(peerToPeer, forKey: "wirelessPeerToPeer")
             wirelessWatcher.peerToPeer = peerToPeer
+            if connectionMode != .cable { wirelessWatcher.stop(); wirelessWatcher.start() }
+        }
+    }
+    @Published var travelRouter: Bool = UserDefaults.standard.bool(forKey: "travelRouter") {
+        didSet {
+            UserDefaults.standard.set(travelRouter, forKey: "travelRouter")
+            wirelessWatcher.travelRouter = travelRouter
             if connectionMode != .cable { wirelessWatcher.stop(); wirelessWatcher.start() }
         }
     }
@@ -168,6 +176,7 @@ final class SessionCoordinator: ObservableObject {
     private let directory: DeviceDirectory
     private let androidWatcher: ADBWatcher
     private let wirelessWatcher: WirelessWatcher
+    private var wirelessEnrollment: EnrollmentListener?
     private let links = LinkStore()
     private let tokens = KeychainPairingTokens()
     private var forwarder: LocalForwarder?
@@ -251,10 +260,10 @@ final class SessionCoordinator: ObservableObject {
     /// the cable carries passthrough, or the listener is off.
     private func syncPhoneLink() {
         guard let port = wirelessWatcher.listenerPort, device?.medium != .usb else { vpnLayer.phoneLink = nil; return }
-        var peers: [String] = []
+        var peers = travelRouter ? [WirelessLink.hotspotGateway] : []
         if let device, device.id.hasPrefix("wifi:"), let host = wirelessWatcher.peers[String(device.id.dropFirst(5))],
            let peer = PeerAddress.numeric(host) {
-            peers = [peer]
+            if !peers.contains(peer) { peers.append(peer) }
         }
         vpnLayer.phoneLink = HelperClient.PhoneLink(port: port, peers: peers)
     }
@@ -309,6 +318,7 @@ final class SessionCoordinator: ObservableObject {
         androidWatcher.onStatusChange = { [weak self] status in self?.androidWatch = status }
         wirelessWatcher.onStatusChange = { [weak self] status in self?.wirelessWatch = status }
         wirelessWatcher.peerToPeer = peerToPeer
+        wirelessWatcher.travelRouter = travelRouter
         wirelessWatcher.onCarrierChange = { [weak self] in self?.refreshWirelessCarrier() }
         wifiMonitor.pathUpdateHandler = { [weak self] path in
             let hotspot = path.status == .satisfied && path.isExpensive
@@ -367,6 +377,69 @@ final class SessionCoordinator: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
                 vpnLayer.runDiagnosticProfile(path: path, username: env["PASSTHROUGH_VPN_TEST_USER"], password: env["PASSTHROUGH_VPN_TEST_PASS"])
             }
+        }
+        // Explicit, one-time setup requested by the Mac's owner. The existing
+        // pinned-TLS enrollment protocol replaces only the initial cable exchange.
+        if let index = CommandLine.arguments.firstIndex(of: "--wireless-enrollment-output"),
+           CommandLine.arguments.count > index + 1,
+           let hostIndex = CommandLine.arguments.firstIndex(of: "--wireless-enrollment-host"),
+           CommandLine.arguments.count > hostIndex + 1 {
+            let path = CommandLine.arguments[index + 1]
+            let host = CommandLine.arguments[hostIndex + 1]
+            Task { self.prepareWirelessEnrollment(output: URL(fileURLWithPath: path), host: host) }
+        }
+    }
+
+    private nonisolated static func writeWirelessEnrollmentStatus(_ data: [String: Any], to output: URL) {
+        guard let encoded = try? JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]) else { return }
+        do {
+            try encoded.write(to: output, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
+        } catch { ptLog(.error, "wireless setup: could not write setup status") }
+    }
+
+    private func prepareWirelessEnrollment(output: URL, host: String) {
+        guard IPv4Address(host) != nil || IPv6Address(host) != nil else {
+            ptLog(.error, "wireless setup: expected the Mac's numeric local address")
+            return
+        }
+        do {
+            wirelessEnrollment?.stop()
+            let identity = try MacIdentity.loadOrCreate(label: Self.identityLabel)
+            let invitation = IPadEnrollment.Invitation(clientID: clientID, name: String(macName.prefix(64)),
+                                                       certSHA256: identity.fingerprint,
+                                                       expiry: Date().addingTimeInterval(3600), kind: .mac)
+            let listener = EnrollmentListener(invitation: invitation, identity: identity)
+            let links = self.links
+            listener.onEnrolled = { [weak self] phone in
+                let slot = "token.iphone.qr." + phone.phoneID
+                guard Keychain.write(phone.token, account: slot),
+                      Keychain.write(phone.linkKey.base64EncodedString(), account: "link." + slot),
+                      links.record(WirelessPhone(phoneID: phone.phoneID, linkKey: phone.linkKey,
+                                                 isAndroid: false, label: phone.name, pairingSlot: slot)) else { return false }
+                Self.writeWirelessEnrollmentStatus(["state": "paired", "phoneName": phone.name], to: output)
+                Task { @MainActor in
+                    self?.connectionMode = .wireless
+                    self?.pairingError = nil
+                    self?.wirelessEnrollmentStatus = "Paired with \(phone.name)"
+                }
+                return true
+            }
+            try listener.start { port in
+                var exported = invitation
+                exported.host = host
+                exported.port = port
+                Self.writeWirelessEnrollmentStatus(["state": "waiting", "pairURL": exported.url.absoluteString,
+                       "macName": invitation.name, "expires": invitation.expiry.timeIntervalSince1970], to: output)
+            }
+            wirelessEnrollment = listener
+            wirelessEnrollmentStatus = "Ready. Open the setup page on your iPhone and approve Pair this Mac."
+            connectionMode = .wireless
+            ptLog(.info, "Wireless setup is ready; approve the pairing link on your iPhone")
+        } catch {
+            wirelessEnrollmentStatus = error.localizedDescription
+            Self.writeWirelessEnrollmentStatus(["state": "failed", "error": error.localizedDescription], to: output)
+            ptLog(.error, "wireless setup: \(error.localizedDescription)")
         }
     }
 

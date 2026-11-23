@@ -39,13 +39,14 @@ final class LinkStore: @unchecked Sendable {
 
     /// A slot holds one phone's pairing, so a phone that relinks with a new
     /// ID (reinstalled) replaces the slot's old entry.
-    func record(_ phone: WirelessPhone) {
+    @discardableResult
+    func record(_ phone: WirelessPhone) -> Bool {
         lock.lock()
         cached.removeAll { $0.phoneID == phone.phoneID || $0.pairingSlot == phone.pairingSlot }
         cached.append(phone)
         let list = cached
         lock.unlock()
-        save(list)
+        return save(list)
     }
 
     /// Forgets every phone paired through `slot` and the key they used.
@@ -58,8 +59,9 @@ final class LinkStore: @unchecked Sendable {
         Keychain.delete("link." + slot)
     }
 
-    private func save(_ list: [WirelessPhone]) {
-        guard let data = try? JSONEncoder().encode(list), let text = String(data: data, encoding: .utf8) else { return }
-        _ = Keychain.write(text, account: Self.phonesAccount)
+    @discardableResult
+    private func save(_ list: [WirelessPhone]) -> Bool {
+        guard let data = try? JSONEncoder().encode(list), let text = String(data: data, encoding: .utf8) else { return false }
+        return Keychain.write(text, account: Self.phonesAccount)
     }
 }

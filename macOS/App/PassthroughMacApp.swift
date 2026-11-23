@@ -19,6 +19,11 @@ struct PassthroughMacApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("Passthrough Wireless Setup", id: "wireless-setup") {
+            WirelessSetupView().environmentObject(session)
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView()
                 .environmentObject(session)
@@ -58,6 +63,10 @@ private struct MenuBarLabel: View {
 
     var body: some View {
         icon.task {
+            if CommandLine.arguments.contains("--wireless-enrollment-output") {
+                openWindow(id: "wireless-setup")
+                return
+            }
             // First run on a Mac never set up: what should the phone do for it?
             guard !SessionCoordinator.isSnapshotRun, WelcomeView.shouldShow(session) else { return }
             openWindow(id: WelcomeView.id)
@@ -79,7 +88,7 @@ private struct MenuBarLabel: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(CommandLine.arguments.contains("--wireless-enrollment-output") ? .regular : .accessory)
         Self.raiseFileDescriptorLimit()
         if let index = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.arguments.count > index + 1 {
             let dir = CommandLine.arguments[index + 1]
@@ -133,4 +142,35 @@ extension Notification.Name {
     static let passthroughWillTerminate = Notification.Name("\(PassthroughProtocol.identifier).willTerminate")
     /// The coordinator finished tearing down for a quit.
     static let passthroughReadyToQuit = Notification.Name("\(PassthroughProtocol.identifier).readyToQuit")
+}
+
+/// A normal background-operable window for the one-time wireless setup.
+private struct WirelessSetupView: View {
+    @EnvironmentObject private var session: SessionCoordinator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Wireless setup").font(.title2.bold())
+            Text(session.wirelessEnrollmentStatus).textSelection(.enabled)
+            Text(session.device.map { "Phone reachable: \($0.label)" } ?? "Waiting for the phone to start sharing.")
+            Text("Internet: \(String(describing: session.phase))").font(.callout)
+            if let note = session.helperNote { Text(note).font(.callout).foregroundStyle(.secondary) }
+            HStack {
+                Button("Register networking helper") {
+                    session.disconnect()
+                    session.retryHelper()
+                }
+                Button("Login Items settings") { session.openLoginItems() }
+            }
+            HStack {
+                Button(session.phase.isConnected ? "Disconnect" : "Connect") { session.toggle() }
+                    .disabled(session.device == nil || session.phase.isBusy)
+                if session.phase.isConnected { Text("Connected").foregroundStyle(.green) }
+            }
+            Text("Keep Personal Hotspot enabled. The iPhone app uses its VPN extension for background sharing.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(width: 480)
+    }
 }

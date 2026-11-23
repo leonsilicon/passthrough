@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import notify
 
 /// Bundles the SOCKS5 server and the control channel behind one switch.
@@ -16,6 +17,7 @@ public final class PassthroughService: @unchecked Sendable {
         public var wireless = false
         /// Let that link use Apple peer-to-peer Wi-Fi, not only a shared network.
         public var peerToPeer = false
+        public var travelRouter: TravelRouterLink?
         public init() {}
     }
 
@@ -106,8 +108,11 @@ public final class PassthroughService: @unchecked Sendable {
         let proxied: WirelessDialer.DirectServer = { [weak socks] stream in
             if let socks { socks.accept(stream) } else { stream.cancel() }
         }
+        let forwardedMac: (tag: String, endpoint: NWEndpoint, source: NWEndpoint.Host?)? = options.travelRouter.map {
+            ($0.macTag, $0.endpoint, .init(WirelessLink.hotspotGateway))
+        }
         let dialer = WirelessDialer(allowedPorts: [options.socksPort, options.controlPort], peerToPeer: options.peerToPeer,
-                                    direct: [options.socksPort: proxied]) {
+                                    direct: [options.socksPort: proxied], forwardedMac: forwardedMac) {
             registry.linkCredentials().filter { wireless || $0.hotspotOnly == true }
         }
         dialer.start()

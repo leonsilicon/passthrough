@@ -97,6 +97,68 @@ final class WirelessLinkTests: XCTestCase {
         XCTAssertEqual(linkedPeer.get(), "127.0.0.1")
     }
 
+    func testTravelRouterSettingsAcceptOnlyAnIPv4HotspotClientAddress() throws {
+        var options = PassthroughService.Options()
+        options.travelRouter = try XCTUnwrap(TravelRouterLink(address: " 172.20.10.2 ", macClientID: "known-mac"))
+        XCTAssertEqual(options.travelRouter?.address, "172.20.10.2")
+        XCTAssertEqual(PassthroughService.Options(providerConfiguration: options.providerConfiguration).travelRouter,
+                       options.travelRouter)
+        for invalid in ["", "172.20.10.0", "172.20.10.1", "172.20.10.15", "192.168.8.1", "::1", "router.local"] {
+            XCTAssertNil(TravelRouterLink(address: invalid, macClientID: "known-mac"), invalid)
+        }
+    }
+
+    func testLinkedPhoneDialsTheForwardedMacWithoutBonjourAndRevocationClosesTheLink() throws {
+        let key = self.key
+        let phoneID = "phone-1"
+        let tag = WirelessLink.macTag(clientID: "known-mac")
+        let listener = WirelessListener(identity: identity, macTag: tag, advertise: false) {
+            $0 == phoneID ? key : nil
+        }
+        defer { listener.stop() }
+        let listening = expectation(description: "the Mac is listening")
+        try listener.start { _ in listening.fulfill() }
+        wait(for: [listening], timeout: 5)
+        let port = try XCTUnwrap(listener.port.flatMap(NWEndpoint.Port.init(rawValue:)))
+
+        let closed = expectation(description: "the phone dropped the revoked link")
+        let linked = expectation(description: "the phone connected without Bonjour")
+        let link = Locked<Mux?>(nil)
+        listener.onLink = { accepted in
+            accepted.mux.onClose = { _ in closed.fulfill() }
+            accepted.mux.start()
+            link.set(accepted.mux)
+            linked.fulfill()
+        }
+        let credential = LinkCredential(macTag: tag, certSHA256: identity.fingerprint, linkKey: key, phoneID: phoneID)
+        let pairedMacs = Locked([credential])
+        let loopback = NWEndpoint.Host.ipv4(.loopback)
+        let dialer = WirelessDialer(allowedPorts: [echoPort],
+                                    forwardedMac: (tag, .hostPort(host: loopback, port: port), loopback)) { pairedMacs.get() }
+        defer { dialer.stop() }
+        dialer.start()
+        wait(for: [linked], timeout: 5)
+
+        let mux = try XCTUnwrap(link.get())
+        let stream = mux.open(port: echoPort)
+        let bytes = Data("through the forwarded port".utf8)
+        let received = Locked(Data()), done = expectation(description: "mux data echoed")
+        readAll(stream, into: received, done: done)
+        stream.send(bytes, isComplete: true) { XCTAssertNil($0) }
+        wait(for: [done], timeout: 5)
+        XCTAssertEqual(received.get(), bytes)
+
+        pairedMacs.set([])
+        dialer.refresh()
+        // The Mac's resumable mux may suspend first, which also means it
+        // can no longer open streams through the revoked pairing.
+        let deadline = Date().addingTimeInterval(3)
+        while !mux.isSuspended && !mux.isClosed && Date() < deadline { usleep(10_000) }
+        XCTAssertTrue(mux.isSuspended || mux.isClosed)
+        mux.close()
+        wait(for: [closed], timeout: 5)
+    }
+
     func testCertificateIsWellFormedAndKeychainIdentityIsStable() throws {
         XCTAssertNotNil(SecCertificateCreateWithData(nil, identity.certificate as CFData))
         let stored = try MacIdentity.loadOrCreate(label: label, dataProtection: false)

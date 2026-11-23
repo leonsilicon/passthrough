@@ -25,10 +25,15 @@ public enum IPadEnrollment {
         public var certSHA256: String
         public var secret: Data
         public var expiry: Date
+        public var kind: ClientKind
+        public var host: String?
+        public var port: UInt16?
 
         public init(clientID: String, name: String, certSHA256: String, secret: Data = WirelessLink.randomBytes(32),
-                    expiry: Date = Date().addingTimeInterval(IPadEnrollment.lifetime)) {
+                    expiry: Date = Date().addingTimeInterval(IPadEnrollment.lifetime),
+                    kind: ClientKind = .ipad, host: String? = nil, port: UInt16? = nil) {
             self.clientID = clientID; self.name = name; self.certSHA256 = certSHA256; self.secret = secret; self.expiry = expiry
+            self.kind = kind; self.host = host; self.port = port
         }
 
         public var tag: String { WirelessLink.macTag(clientID: clientID) }
@@ -37,7 +42,7 @@ public enum IPadEnrollment {
         public var url: URL {
             var c = URLComponents()
             c.scheme = "passthrough"
-            c.host = "pair-ipad"
+            c.host = kind == .mac ? "pair-mac" : "pair-ipad"
             c.queryItems = [
                 URLQueryItem(name: "v", value: "1"),
                 URLQueryItem(name: "c", value: clientID),
@@ -46,22 +51,33 @@ public enum IPadEnrollment {
                 URLQueryItem(name: "s", value: secret.base64URL),
                 URLQueryItem(name: "e", value: String(Int(expiry.timeIntervalSince1970))),
             ]
+            if let host, let port {
+                c.queryItems?.append(contentsOf: [URLQueryItem(name: "h", value: host), URLQueryItem(name: "p", value: String(port))])
+            }
             return c.url!
         }
 
         /// Nil unless it's a well-formed version 1 invitation.
         public init?(url: URL) {
-            guard url.scheme == "passthrough", url.host == "pair-ipad",
-                  let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return nil }
+            guard url.scheme == "passthrough", ["pair-ipad", "pair-mac"].contains(url.host ?? ""),
+                  let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+                  Set(items.map(\.name)).count == items.count else { return nil }
             func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
             guard value("v") == "1",
                   let clientID = value("c"), (1...64).contains(clientID.count),
                   let name = value("n"), (1...64).contains(name.count),
                   let cert = value("f"), cert.count == 64, cert.allSatisfy(\.isHexDigit),
                   let secret = value("s").flatMap(Data.init(base64URL:)), secret.count == 32,
-                  let expiry = value("e").flatMap(TimeInterval.init) else { return nil }
+                  let expiry = value("e").flatMap(TimeInterval.init), expiry.isFinite else { return nil }
+            let host = value("h")
+            let port = value("p").flatMap(UInt16.init)
+            if host != nil || value("p") != nil {
+                guard let host, IPv4Address(host) != nil || IPv6Address(host) != nil,
+                      let port, port > 0 else { return nil }
+            }
             self.init(clientID: clientID, name: name, certSHA256: cert.lowercased(), secret: secret,
-                      expiry: Date(timeIntervalSince1970: expiry))
+                      expiry: Date(timeIntervalSince1970: expiry), kind: url.host == "pair-mac" ? .mac : .ipad,
+                      host: host, port: port)
         }
     }
 
@@ -94,9 +110,9 @@ public enum IPadEnrollment {
         case notFound, refused(String), expired, failed(String)
         public var errorDescription: String? {
             switch self {
-            case .notFound: "Couldn't find the iPad. Make sure it's on this iPhone's Personal Hotspot with its pairing code showing."
-            case .refused(let why): "The iPad refused: \(why)"
-            case .expired: "That code has expired. Show a new one on the iPad."
+            case .notFound: "Couldn't find the device. Make sure it's on this iPhone's Personal Hotspot with its pairing code showing."
+            case .refused(let why): "The device refused: \(why)"
+            case .expired: "That code has expired. Generate a new pairing link."
             case .failed(let why): "Pairing didn't finish: \(why)"
             }
         }
@@ -130,24 +146,18 @@ public enum IPadEnrollment {
         guard !invitation.isExpired else { queue.async { completion(.failure(.expired)) }; return }
         let work = DispatchQueue(label: "\(PassthroughProtocol.identifier).enroll")
         let state = EnrollState(queue: queue, completion: completion)
-        let params = NWParameters.tcp
-        params.includePeerToPeer = false
-        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: WirelessLink.serviceType, domain: nil), using: params)
-        state.browser = browser
-        browser.browseResultsChangedHandler = { results, _ in
-            guard let result = results.first(where: {
-                if case .bonjour(let txt) = $0.metadata { return txt[txtKey] == invitation.tag } else { return false }
-            }), state.claimDial() else { return }
-            browser.cancel()
-            work.asyncAfter(deadline: .now() + exchangeTimeout) { state.finish(.failure(.failed("the iPad didn't answer in time"))) }
-            let connection = NWConnection(to: result.endpoint, using: WirelessLink.pinnedClientParameters(pin: invitation.certSHA256, peerToPeer: false))
+        let dial: @Sendable (NWEndpoint) -> Void = { endpoint in
+            guard state.claimDial() else { return }
+            state.browser?.cancel()
+            work.asyncAfter(deadline: .now() + exchangeTimeout) { state.finish(.failure(.failed("the device didn't answer in time"))) }
+            let connection = NWConnection(to: endpoint, using: WirelessLink.pinnedClientParameters(pin: invitation.certSHA256, peerToPeer: false))
             let stream = ConnectionStream(connection, queue: work)
             state.stream = stream
             stream.onTerminated = { error in state.finish(.failure(.failed(error?.localizedDescription ?? "the connection closed"))) }
             read(stream) { result in
                 guard case .success(let challenge) = result, challenge.t == "challenge",
                       let nonce = challenge.nonce.flatMap({ Data(base64Encoded: $0) }), nonce.count == 32 else {
-                    state.finish(.failure(.failed("the iPad didn't answer as expected"))); return
+                    state.finish(.failure(.failed("the device didn't answer as expected"))); return
                 }
                 let mac = proof(secret: invitation.secret, nonce: nonce).base64EncodedString()
                 send(Message(t: "enroll", mac: mac, phoneID: phoneID, name: phoneName, token: token,
@@ -161,7 +171,22 @@ public enum IPadEnrollment {
                 }
             }
         }
-        browser.start(queue: work)
+        if let host = invitation.host, let port = invitation.port, port > 0,
+           IPv4Address(host) != nil || IPv6Address(host) != nil {
+            dial(.hostPort(host: .init(host), port: .init(rawValue: port)!))
+        } else {
+            let params = NWParameters.tcp
+            params.includePeerToPeer = false
+            let browser = NWBrowser(for: .bonjourWithTXTRecord(type: WirelessLink.serviceType, domain: nil), using: params)
+            state.browser = browser
+            browser.browseResultsChangedHandler = { results, _ in
+                guard let result = results.first(where: {
+                    if case .bonjour(let txt) = $0.metadata { return txt[txtKey] == invitation.tag } else { return false }
+                }) else { return }
+                dial(result.endpoint)
+            }
+            browser.start(queue: work)
+        }
         work.asyncAfter(deadline: .now() + timeout) { if !state.hasDialed { state.finish(.failure(.notFound)) } }
     }
 

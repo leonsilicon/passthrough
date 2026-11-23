@@ -60,6 +60,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Reach linked Macs without the cable. Best: join this \(ThisDevice.name)'s Personal Hotspot from the Mac's Wi-Fi menu. It stays up while the iPhone is locked, and your Mac's traffic still goes through Passthrough.\n\nPeer-to-peer Wi-Fi needs no hotspot, but iOS pauses it for minutes at a time while the iPhone is locked.\n\nA Mac links the first time it connects over USB. The link is encrypted and only a paired Mac can use it.")
                 }
+                if !ThisDevice.isPad { TravelRouterSettings() }
                 RemoteShellSettings(shell: model.shell)
                 AppLockSettings()
                 CaptureProtectionSettings()
@@ -279,5 +280,52 @@ private struct ManualShellAddressRow: View {
         .padding(.vertical, 4)
         .onAppear { text = shell.manualAddress(for: macID) ?? "" }
         .onChange(of: text) { _, value in shell.setManualAddress(value, for: macID) }
+    }
+}
+
+private struct TravelRouterSettings: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var address = ""
+    @State private var macClientID = ""
+
+    private var linkedMacs: [PairedClient] { model.pairedClients.filter { $0.linkCertificate != nil } }
+    private var draft: TravelRouterLink? {
+        guard linkedMacs.contains(where: { $0.id == macClientID }) else { return nil }
+        return TravelRouterLink(address: address, macClientID: macClientID)
+    }
+
+    var body: some View {
+        Section {
+            Picker("Mac", selection: $macClientID) {
+                Text("Select a linked Mac").tag("")
+                ForEach(linkedMacs) { mac in Text(mac.name).tag(mac.id) }
+            }
+            TextField("Router's hotspot IP address", text: $address)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Save travel router") {
+                if let draft { model.setTravelRouter(draft) }
+            }
+            .disabled(draft == nil || draft == model.travelRouter)
+            if model.travelRouter != nil {
+                Button("Remove travel router", role: .destructive) {
+                    model.setTravelRouter(nil)
+                    address = ""
+                }
+            }
+        } header: {
+            Text("Travel router")
+        } footer: {
+            Text("Enable Wireless link and forward TCP port \(TravelRouterLink.port) to the paired Mac. Enter the IP address the router received from Personal Hotspot.")
+        }
+        .onAppear {
+            address = model.travelRouter?.address ?? ""
+            if let saved = model.travelRouter?.macClientID, linkedMacs.contains(where: { $0.id == saved }) {
+                macClientID = saved
+            } else if linkedMacs.count == 1 {
+                macClientID = linkedMacs[0].id
+            }
+        }
     }
 }

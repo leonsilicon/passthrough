@@ -42,6 +42,8 @@ public final class WirelessWatcher: DeviceWatcher {
     private let provenAddresses: ProvenAddressStore
     /// Also listen over Apple peer-to-peer Wi-Fi; takes effect on the next start.
     public var peerToPeer = false
+    /// Listen on the fixed TCP port forwarded by the travel router.
+    public var travelRouter = false
     private var listener: WirelessListener?
     private var links: [String: (mux: Mux, device: PhoneDevice)] = [:]   // by phoneID
     private var order: [String] = []
@@ -62,7 +64,7 @@ public final class WirelessWatcher: DeviceWatcher {
         do {
             let phones = self.phones
             let listener = WirelessListener(identity: try identity(), macTag: macTag(), peerToPeer: peerToPeer,
-                                            provenAddresses: provenAddresses) { id in
+                                            travelRouter: travelRouter, provenAddresses: provenAddresses) { id in
                 phones().first { $0.phoneID == id }?.linkKey
             }
             listener.onLink = { [weak self] link in Task { @MainActor in self?.linked(link) } }

@@ -126,6 +126,10 @@ struct GeneralSettings: View {
                         Text("Use peer-to-peer Wi-Fi")
                         Text("No hotspot needed, but it drops for minutes while an iPhone is locked.")
                     }
+                    Toggle(isOn: $session.travelRouter) {
+                        Text("Listen for a travel router")
+                        Text("Forward TCP port \(TravelRouterLink.port) from the router to this Mac.")
+                    }
                 }
             } header: {
                 Text("Connection")

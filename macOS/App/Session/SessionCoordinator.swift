@@ -104,6 +104,13 @@ final class SessionCoordinator: ObservableObject {
             if connectionMode != .cable { wirelessWatcher.stop(); wirelessWatcher.start() }
         }
     }
+    @Published var travelRouter: Bool = UserDefaults.standard.bool(forKey: "travelRouter") {
+        didSet {
+            UserDefaults.standard.set(travelRouter, forKey: "travelRouter")
+            wirelessWatcher.travelRouter = travelRouter
+            if connectionMode != .cable { wirelessWatcher.stop(); wirelessWatcher.start() }
+        }
+    }
     /// Block the internet while the Mac is on a phone's hotspot but passthrough
     /// is down, so the hotspot's own data allowance is never used.
     @Published var hotspotGuard: Bool = UserDefaults.standard.object(forKey: "hotspotGuard") as? Bool ?? true {
@@ -253,10 +260,10 @@ final class SessionCoordinator: ObservableObject {
     /// the cable carries passthrough, or the listener is off.
     private func syncPhoneLink() {
         guard let port = wirelessWatcher.listenerPort, device?.medium != .usb else { vpnLayer.phoneLink = nil; return }
-        var peers: [String] = []
+        var peers = travelRouter ? [WirelessLink.hotspotGateway] : []
         if let device, device.id.hasPrefix("wifi:"), let host = wirelessWatcher.peers[String(device.id.dropFirst(5))],
            let peer = PeerAddress.numeric(host) {
-            peers = [peer]
+            if !peers.contains(peer) { peers.append(peer) }
         }
         vpnLayer.phoneLink = HelperClient.PhoneLink(port: port, peers: peers)
     }
@@ -311,6 +318,7 @@ final class SessionCoordinator: ObservableObject {
         androidWatcher.onStatusChange = { [weak self] status in self?.androidWatch = status }
         wirelessWatcher.onStatusChange = { [weak self] status in self?.wirelessWatch = status }
         wirelessWatcher.peerToPeer = peerToPeer
+        wirelessWatcher.travelRouter = travelRouter
         wirelessWatcher.onCarrierChange = { [weak self] in self?.refreshWirelessCarrier() }
         wifiMonitor.pathUpdateHandler = { [weak self] path in
             let hotspot = path.status == .satisfied && path.isExpensive

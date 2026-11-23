@@ -11,6 +11,8 @@ extension PassthroughService.Options {
         static let controlPort = "controlPort"
         static let wireless = "wireless"
         static let peerToPeer = "peerToPeer"
+        static let travelRouterAddress = "travelRouterAddress"
+        static let travelRouterMac = "travelRouterMac"
     }
 
     /// Reads the options the app stored in the tunnel's provider configuration.
@@ -22,11 +24,19 @@ extension PassthroughService.Options {
         controlPort = UInt16(config[Key.controlPort] as? Int ?? Int(PassthroughProtocol.defaultControlPort))
         wireless = config[Key.wireless] as? Bool ?? false
         peerToPeer = config[Key.peerToPeer] as? Bool ?? false
+        travelRouter = TravelRouterLink(address: config[Key.travelRouterAddress] as? String ?? "",
+                                        macClientID: config[Key.travelRouterMac] as? String ?? "")
     }
 
     public var providerConfiguration: [String: Any] {
-        [Key.cellularOnly: cellularOnly, Key.allowUDP: allowUDP,
-         Key.socksPort: Int(socksPort), Key.controlPort: Int(controlPort), Key.wireless: wireless, Key.peerToPeer: peerToPeer]
+        var configuration: [String: Any] = [Key.cellularOnly: cellularOnly, Key.allowUDP: allowUDP,
+                                            Key.socksPort: Int(socksPort), Key.controlPort: Int(controlPort),
+                                            Key.wireless: wireless, Key.peerToPeer: peerToPeer]
+        if let travelRouter {
+            configuration[Key.travelRouterAddress] = travelRouter.address
+            configuration[Key.travelRouterMac] = travelRouter.macClientID
+        }
+        return configuration
     }
 }
 

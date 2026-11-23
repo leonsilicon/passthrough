@@ -41,23 +41,28 @@ public enum KillSwitchRules {
     /// app can name the new address).
     public struct PhoneLink: Equatable, Sendable {
         /// The Mac's wireless listener's TCP port.
-        public var port: Int
+        public var port: Int?
         /// The phone's address on the link (numeric, no zone).
         public var peers: [String]
         /// Directly connected private networks (`LocalNetworks.subnets`).
         public var subnets: [CIDR]
-        public init(port: Int, peers: [String] = [], subnets: [CIDR] = []) {
-            self.port = port; self.peers = peers; self.subnets = subnets
+        /// The Mac may initiate a TLS connection to the iPhone hotspot gateway.
+        public var routerRelay: Bool
+
+        public init(port: Int?, peers: [String] = [], subnets: [CIDR] = [], routerRelay: Bool = false) {
+            self.port = port; self.peers = peers; self.subnets = subnets; self.routerRelay = routerRelay
         }
 
-        /// Read from an XPC configuration dictionary: nil when `portKey` is
-        /// absent (no wireless link), an error when either value is malformed.
-        public static func read(_ dict: [String: Any], portKey: String, peersKey: String) throws -> PhoneLink? {
-            guard dict[portKey] != nil else { return nil }
-            let port = try XPCInput.port(dict, portKey, default: 1)
+        /// Read from XPC. The router option always uses the fixed hotspot
+        /// endpoint, so XPC callers cannot choose a new destination for it.
+        public static func read(_ dict: [String: Any], portKey: String, peersKey: String,
+                                routerRelayKey: String = "phoneLinkRouterRelay") throws -> PhoneLink? {
+            let routerRelay = try XPCInput.bool(dict, routerRelayKey, default: false)
+            guard dict[portKey] != nil || routerRelay else { return nil }
+            let port = try dict[portKey].map { _ in Int(try XPCInput.port(dict, portKey, default: 1)) }
             let peers = try XPCInput.ipAddresses(dict, peersKey, maxCount: 4, default: [])
             guard peers.allSatisfy(isPeer) else { throw XPCInput.Invalid(peersKey) }
-            return PhoneLink(port: Int(port), peers: peers)
+            return PhoneLink(port: port, peers: peers, routerRelay: routerRelay)
         }
 
         /// A numeric address with no zone ("fe80::1%en0" parses, but is no pf address).
@@ -117,11 +122,15 @@ public enum KillSwitchRules {
             guard seen.insert("\(endpoint.ip) \(endpoint.port)").inserted else { continue }
             rules.append("pass out quick proto { tcp udp } to \(endpoint.ip) port \(endpoint.port) no state")
         }
-        if let link = input.phoneLink, (1...65535).contains(link.port) {
+        if let link = input.phoneLink, let port = link.port, (1...65535).contains(port) {
             let targets = link.peers.filter(PhoneLink.isPeer) + link.subnets.filter { $0.prefixLength > 0 }.map(\.description)
             for target in targets where seen.insert("link \(target)").inserted {
-                rules.append("pass out quick proto tcp from any port \(link.port) to \(target) no state")
+                rules.append("pass out quick proto tcp from any port \(port) to \(target) no state")
             }
+        }
+        if input.phoneLink?.routerRelay == true {
+            // The fixed endpoint used by PhoneTransport's RouterRelay.
+            rules.append("pass out quick inet proto tcp to 172.20.10.1 port 17891 no state")
         }
         rules += [
             // Getting an address at all: DHCP, DHCPv6, and IPv6 neighbour

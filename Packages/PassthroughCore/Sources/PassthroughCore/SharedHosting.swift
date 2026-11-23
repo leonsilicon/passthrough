@@ -11,6 +11,7 @@ extension PassthroughService.Options {
         static let controlPort = "controlPort"
         static let wireless = "wireless"
         static let peerToPeer = "peerToPeer"
+        static let routerRelay = "routerRelay"
     }
 
     /// Reads the options the app stored in the tunnel's provider configuration.
@@ -22,11 +23,13 @@ extension PassthroughService.Options {
         controlPort = UInt16(config[Key.controlPort] as? Int ?? Int(PassthroughProtocol.defaultControlPort))
         wireless = config[Key.wireless] as? Bool ?? false
         peerToPeer = config[Key.peerToPeer] as? Bool ?? false
+        routerRelay = config[Key.routerRelay] as? Bool ?? false
     }
 
     public var providerConfiguration: [String: Any] {
         [Key.cellularOnly: cellularOnly, Key.allowUDP: allowUDP,
-         Key.socksPort: Int(socksPort), Key.controlPort: Int(controlPort), Key.wireless: wireless, Key.peerToPeer: peerToPeer]
+         Key.socksPort: Int(socksPort), Key.controlPort: Int(controlPort), Key.wireless: wireless, Key.peerToPeer: peerToPeer,
+         Key.routerRelay: routerRelay]
     }
 }
 

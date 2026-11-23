@@ -204,6 +204,7 @@ public enum SharedKeys {
     public static let wireless = "settings.wireless"
     /// Let the wireless link use Apple peer-to-peer Wi-Fi as well.
     public static let peerToPeer = "settings.peerToPeer"
+    public static let routerRelay = "settings.routerRelay"
     public static let usageMonthRx = "usage.month.rx"
     public static let usageMonthTx = "usage.month.tx"
     public static let usageMonthStart = "usage.month.start"

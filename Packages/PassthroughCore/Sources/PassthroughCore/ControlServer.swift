@@ -124,13 +124,22 @@ public final class ControlServer: @unchecked Sendable {
         let listener = try NWListener(using: params)
         listener.newConnectionHandler = { [weak self] connection in
             guard let self else { connection.cancel(); return }
-            guard self.peers.count < 8 else { connection.cancel(); return }   // a handful of Macs, not a flood
-            let peer = Peer(server: self, connection: connection)
-            self.peers[ObjectIdentifier(peer)] = peer
-            peer.start(on: self.queue)
+            self.acceptOnQueue(ConnectionStream(connection, queue: self.queue))
         }
         listener.start(queue: queue)
         return listener
+    }
+
+    /// A control stream delivered by an authenticated wireless transport.
+    public func accept(_ stream: ByteStream) {
+        queue.async { [self] in acceptOnQueue(stream) }
+    }
+
+    private func acceptOnQueue(_ stream: ByteStream) {
+        guard isRunning, peers.count < 8 else { stream.cancel(); return }
+        let peer = Peer(server: self, stream: stream)
+        peers[ObjectIdentifier(peer)] = peer
+        peer.start(on: queue)
     }
 
     fileprivate func remove(_ peer: Peer) {
@@ -346,9 +355,9 @@ private final class Peer: @unchecked Sendable {
     /// What the Mac's hello said carries this connection ("usb" or "wireless").
     var via: String?
 
-    init(server: ControlServer, connection: NWConnection) {
+    init(server: ControlServer, stream: ByteStream) {
         self.server = server
-        self.channel = ControlConnection(connection, queue: server.queue)
+        self.channel = ControlConnection(stream)
     }
 
     func start(on queue: DispatchQueue) {

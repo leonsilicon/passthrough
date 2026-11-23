@@ -199,12 +199,18 @@ final class HelperClient {
     /// The wireless link to the phone, for the kill switch to let through.
     struct PhoneLink: Equatable {
         /// The Mac's wireless listener port.
-        var port: UInt16
+        var port: UInt16?
         /// Where the phone is on the link, if known.
         var peers: [String]
+        var routerRelay = false
 
         var configuration: [String: Any] {
-            [VPNConfigKey.phoneLinkPort: Int(port), VPNConfigKey.phoneLinkPeers: peers]
+            var values: [String: Any] = [VPNConfigKey.phoneLinkRouterRelay: routerRelay]
+            if let port {
+                values[VPNConfigKey.phoneLinkPort] = Int(port)
+                values[VPNConfigKey.phoneLinkPeers] = peers
+            }
+            return values
         }
     }
 

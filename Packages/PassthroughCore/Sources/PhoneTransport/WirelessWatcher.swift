@@ -11,10 +11,13 @@ public struct WirelessPhone: Codable, Equatable, Sendable {
     /// The Wi-Fi Direct network an Android phone hosts for the Mac to join.
     public var network: String?
     public var passphrase: String?
+    public var routerCertificate: String?
 
-    public init(phoneID: String, linkKey: Data, isAndroid: Bool, label: String, pairingSlot: String, network: String? = nil, passphrase: String? = nil) {
+    public init(phoneID: String, linkKey: Data, isAndroid: Bool, label: String, pairingSlot: String,
+                network: String? = nil, passphrase: String? = nil, routerCertificate: String? = nil) {
         self.phoneID = phoneID; self.linkKey = linkKey; self.isAndroid = isAndroid; self.label = label
         self.pairingSlot = pairingSlot; self.network = network; self.passphrase = passphrase
+        self.routerCertificate = routerCertificate
     }
 }
 
@@ -45,6 +48,9 @@ public final class WirelessWatcher: DeviceWatcher {
     private var listener: WirelessListener?
     private var links: [String: (mux: Mux, device: PhoneDevice)] = [:]   // by phoneID
     private var order: [String] = []
+    private let routerQueue = DispatchQueue(label: "\(PassthroughProtocol.identifier).router-dial")
+    private var routerTask: Task<Void, Never>?
+    private var routerAttempts: [String: (id: UUID, stream: ConnectionStream)] = [:]
 
     /// `phones` must be safe to call from any thread (the listener asks for keys).
     /// `provenAddresses` is every listener's, across restarts (`WirelessListener`).
@@ -83,6 +89,13 @@ public final class WirelessWatcher: DeviceWatcher {
             }
             self.listener = listener
             status = WatchStatus(state: .watching)
+            routerTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    self?.dialThroughRouter()
+                    do { try await Task.sleep(for: .seconds(4)) }
+                    catch { return }
+                }
+            }
         } catch {
             ptLog(.error, "wireless: could not start: \(error.localizedDescription)")
             status = WatchStatus(state: .unavailable, hint: error.localizedDescription)
@@ -92,6 +105,10 @@ public final class WirelessWatcher: DeviceWatcher {
     public func stop() {
         listener?.stop()
         listener = nil
+        routerTask?.cancel()
+        routerTask = nil
+        routerAttempts.values.forEach { $0.stream.cancel() }
+        routerAttempts.removeAll()
         links.values.forEach { $0.mux.close() }
         links.removeAll()
         carriers.removeAll()
@@ -108,6 +125,7 @@ public final class WirelessWatcher: DeviceWatcher {
     /// Ends a phone's link now (it was forgotten): it would otherwise carry
     /// on until it dropped.
     public func drop(phoneID: String) {
+        routerAttempts.removeValue(forKey: phoneID)?.stream.cancel()
         guard let link = links.removeValue(forKey: phoneID) else { return }
         carriers[phoneID] = nil
         peers[phoneID] = nil
@@ -116,9 +134,33 @@ public final class WirelessWatcher: DeviceWatcher {
         publish()
     }
 
+    private func dialThroughRouter() {
+        for phone in phones() where phone.routerCertificate != nil {
+            let id = phone.phoneID
+            if let link = links[id], !link.mux.isClosed && !link.mux.isSuspended { continue }
+            guard routerAttempts[id] == nil else { continue }
+            let attemptID = UUID()
+            let stream = RouterRelay.dial(phone: phone, macTag: macTag(), queue: routerQueue) { [weak self] mux in
+                Task { @MainActor in
+                    guard let self, self.routerAttempts[id]?.id == attemptID else { mux?.close(); return }
+                    self.routerAttempts[id] = nil
+                    guard let mux else { return }
+                    self.linked(.init(phoneID: id, mux: mux, carrier: RouterRelay.carrier, peer: WirelessLink.hotspotGateway))
+                }
+            }
+            if let stream { routerAttempts[id] = (attemptID, stream) }
+        }
+    }
+
     private func linked(_ link: WirelessListener.Link) {
         guard listener != nil, let phone = phones().first(where: { $0.phoneID == link.phoneID }) else { link.mux.close(); return }
         let id = link.phoneID
+        routerAttempts.removeValue(forKey: id)?.stream.cancel()
+        if carriers[id] == RouterRelay.carrier, link.carrier != RouterRelay.carrier,
+           links[id]?.mux.isClosed == false {
+            link.mux.close()
+            return
+        }
         // A phone that comes back with a new session (it restarted, or was
         // gone too long to resume) replaces its old link. Report that as the
         // old device leaving and a new one arriving: the device ID is the same,

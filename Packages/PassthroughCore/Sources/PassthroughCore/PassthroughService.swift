@@ -16,6 +16,8 @@ public final class PassthroughService: @unchecked Sendable {
         public var wireless = false
         /// Let that link use Apple peer-to-peer Wi-Fi, not only a shared network.
         public var peerToPeer = false
+        /// Allow the background extension to accept a linked Mac via the hotspot gateway.
+        public var routerRelay = false
         public init() {}
     }
 

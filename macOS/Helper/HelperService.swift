@@ -179,7 +179,8 @@ final class HelperService: NSObject, PassthroughHelperProtocol {
                 config.blockIPv6 = try XPCInput.bool(configuration, VPNConfigKey.blockIPv6, default: true)
                 config.allowLocalNetwork = try XPCInput.bool(configuration, VPNConfigKey.allowLocalNetwork, default: true)
                 config.phoneLink = try KillSwitchRules.PhoneLink.read(configuration, portKey: VPNConfigKey.phoneLinkPort,
-                                                                      peersKey: VPNConfigKey.phoneLinkPeers)
+                                                                      peersKey: VPNConfigKey.phoneLinkPeers,
+                                                                      routerRelayKey: VPNConfigKey.phoneLinkRouterRelay)
             } catch {
                 reply(false, error.localizedDescription); return
             }
@@ -229,7 +230,8 @@ final class HelperService: NSObject, PassthroughHelperProtocol {
         queue.async {
             do {
                 let link = try KillSwitchRules.PhoneLink.read(configuration, portKey: VPNConfigKey.phoneLinkPort,
-                                                              peersKey: VPNConfigKey.phoneLinkPeers)
+                                                              peersKey: VPNConfigKey.phoneLinkPeers,
+                                                              routerRelayKey: VPNConfigKey.phoneLinkRouterRelay)
                 self.vpn.setPhoneLink(link)
             } catch {
                 HelperLog.warn("phone link refused: \(error.localizedDescription)")

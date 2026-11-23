@@ -118,6 +118,7 @@ public enum VPNConfigKey {
     public static let phoneLinkPort = "phoneLinkPort"
     /// Where the phone is on that link: numeric addresses, at most 4.
     public static let phoneLinkPeers = "phoneLinkPeers"
+    public static let phoneLinkRouterRelay = "phoneLinkRouterRelay"
 }
 
 /// Keys of the `vpn` sub-dictionary in `getStatus`.

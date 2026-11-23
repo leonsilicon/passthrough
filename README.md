@@ -82,6 +82,8 @@ Details in the [security model](docs/GUIDE.md#security-model) and [SECURITY.md](
 
 The Mac routes its traffic into a tunnel that ends on the phone, and the phone opens each connection with its own network stack. The same pairing then carries everything else: the remote shell, the Mac's state, and your requests to change it. Both phone apps speak the [same protocol](protocol/README.md), so the Mac treats them alike.
 
+When the iPhone is the upstream connection for a travel router, the Mac can stay on the router's Wi-Fi in Router mode. See [Connect through a travel router](docs/GUIDE.md#connect-through-a-travel-router).
+
 ## Get started
 
 You build it yourself (there are no signed releases yet). You'll need Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and an Apple Developer account; for Android, JDK 25 and the Android SDK.

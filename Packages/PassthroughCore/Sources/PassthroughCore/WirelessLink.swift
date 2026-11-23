@@ -230,13 +230,16 @@ public enum WirelessLink {
         public var t: String
         public var nonce: String?
         public var phoneID: String?
+        public var macTag: String?
         public var mac: String?
         /// The session the phone wants to continue (proof), or the new one (fresh).
         public var session: String?
         /// Stream positions of the side that sends the line (proof, resume).
         public var streams: [MuxStreamState]?
-        public init(t: String, nonce: String? = nil, phoneID: String? = nil, mac: String? = nil, session: String? = nil, streams: [MuxStreamState]? = nil) {
-            self.t = t; self.nonce = nonce; self.phoneID = phoneID; self.mac = mac; self.session = session; self.streams = streams
+        public init(t: String, nonce: String? = nil, phoneID: String? = nil, macTag: String? = nil, mac: String? = nil,
+                    session: String? = nil, streams: [MuxStreamState]? = nil) {
+            self.t = t; self.nonce = nonce; self.phoneID = phoneID; self.macTag = macTag; self.mac = mac
+            self.session = session; self.streams = streams
         }
     }
 

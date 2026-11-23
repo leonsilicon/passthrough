@@ -61,11 +61,11 @@ final class IPadEnrollmentTests: XCTestCase {
         return listener
     }
 
-    private func enroll(_ invitation: IPadEnrollment.Invitation, token: String, linkKey: Data) -> Result<Void, IPadEnrollment.EnrollmentError> {
+    private func enroll(_ invitation: IPadEnrollment.Invitation, token: String, linkKey: Data, routerCertificate: String? = nil) -> Result<Void, IPadEnrollment.EnrollmentError> {
         let done = expectation(description: "enrolled")
         let outcome = Locked<Result<Void, IPadEnrollment.EnrollmentError>?>(nil)
         IPadEnrollment.enroll(invitation, phoneID: "phone-1", phoneName: "Test iPhone", token: token, linkKey: linkKey,
-                              timeout: 10, queue: .global()) { result in outcome.set(result); done.fulfill() }
+                              routerCertificate: routerCertificate, timeout: 10, queue: .global()) { result in outcome.set(result); done.fulfill() }
         wait(for: [done], timeout: 10 + IPadEnrollment.exchangeTimeout + 5)   // a stale Bonjour entry is dialed, then times out
         return outcome.get() ?? .failure(.notFound)
     }
@@ -119,8 +119,12 @@ final class IPadEnrollmentTests: XCTestCase {
         }
         XCTAssertTrue(kept.get().isEmpty)
         let token = PairingToken.generate(), linkKey = WirelessLink.randomBytes(32)
-        guard case .success = enroll(invitation, token: token, linkKey: linkKey) else { return XCTFail("direct TLS enrollment failed") }
+        let fingerprint = String(repeating: "ab", count: 32)
+        guard case .success = enroll(invitation, token: token, linkKey: linkKey, routerCertificate: fingerprint) else {
+            return XCTFail("direct TLS enrollment failed")
+        }
         XCTAssertEqual(kept.get().first?.token, token)
         XCTAssertEqual(kept.get().first?.linkKey, linkKey)
+        XCTAssertEqual(kept.get().first?.routerCertificate, fingerprint)
     }
 }

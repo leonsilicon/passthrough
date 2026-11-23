@@ -55,10 +55,18 @@ struct SettingsView: View {
                     Toggle("Use peer-to-peer Wi-Fi", isOn: $model.peerToPeer)
                         .disabled(!model.wireless)
                         .onChange(of: model.peerToPeer) { _, _ in model.restartIfRunning() }
+                    if !ThisDevice.isPad {
+                        Toggle("Connect through a travel router", isOn: $model.routerRelay)
+                            .disabled(model.hosting != .background || !model.extensionAvailable)
+                            .onChange(of: model.routerRelay) { _, enabled in
+                                if enabled { LocalNetworkPermission.request() }
+                                model.restartIfRunning()
+                            }
+                    }
                 } header: {
                     Text("Wireless")
                 } footer: {
-                    Text("Reach linked Macs without the cable. Best: join this \(ThisDevice.name)'s Personal Hotspot from the Mac's Wi-Fi menu. It stays up while the iPhone is locked, and your Mac's traffic still goes through Passthrough.\n\nPeer-to-peer Wi-Fi needs no hotspot, but iOS pauses it for minutes at a time while the iPhone is locked.\n\nA Mac links the first time it connects over USB. The link is encrypted and only a paired Mac can use it.")
+                    Text("Reach linked Macs without the cable. Best: join this \(ThisDevice.name)'s Personal Hotspot from the Mac's Wi-Fi menu. It stays up while the iPhone is locked, and your Mac's traffic still goes through Passthrough.\n\nPeer-to-peer Wi-Fi needs no hotspot, but iOS pauses it for minutes at a time while the iPhone is locked.\n\nFor a travel router, enable the setting before pairing the Mac over shared Wi-Fi. Then connect the router to Personal Hotspot. The Mac can stay on the router's Wi-Fi.")
                 }
                 RemoteShellSettings(shell: model.shell)
                 AppLockSettings()

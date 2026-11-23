@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Combine
 import PassthroughCore
+import PhoneTransport
 
 /// Everything the iOS screens observe. Starts the proxy on a `ProxyHost`
 /// (the VPN extension, or this process), and owns pairing and usage.
@@ -74,6 +75,7 @@ final class AppModel: ObservableObject {
     @AppStorage(SharedKeys.controlPort, store: AppModel.groupDefaults) var controlPort = Int(PassthroughProtocol.defaultControlPort)
     @AppStorage(SharedKeys.wireless, store: AppModel.groupDefaults) var wireless = false
     @AppStorage(SharedKeys.peerToPeer, store: AppModel.groupDefaults) var peerToPeer = false
+    @AppStorage(SharedKeys.routerRelay, store: AppModel.groupDefaults) var routerRelay = false
     @AppStorage("hosting", store: AppModel.groupDefaults) var hostingRaw = Hosting.background.rawValue
     var hosting: Hosting {
         get { Hosting(rawValue: hostingRaw) ?? .background }
@@ -182,6 +184,7 @@ final class AppModel: ObservableObject {
         options.allowUDP = allowUDP
         options.wireless = wireless
         options.peerToPeer = peerToPeer
+        options.routerRelay = routerRelay && hosting == .background && extensionAvailable && !ThisDevice.isPad
         let host = activeHost
         Task {
             do {
@@ -297,13 +300,20 @@ final class AppModel: ObservableObject {
     /// of the same iPad keeps working.
     func addIPad(_ invitation: IPadEnrollment.Invitation) async -> Result<Void, IPadEnrollment.EnrollmentError> {
         guard !invitation.isExpired else { return .failure(.expired) }
+        let routerCertificate: String?
+        do {
+            routerCertificate = invitation.kind == .mac && routerRelay ? try RouterRelay.identity().fingerprint : nil
+        } catch {
+            return .failure(.failed(error.localizedDescription))
+        }
         guard let new = registry.prepareClient(id: invitation.clientID, name: invitation.name, kind: invitation.kind,
                                                certificateSHA256: invitation.certSHA256, linkKey: WirelessLink.randomBytes(32)) else {
             return .failure(.refused("that code names a device already paired with another role"))
         }
         let registry = self.registry
         var result: Result<Void, IPadEnrollment.EnrollmentError> = await withCheckedContinuation { continuation in
-            IPadEnrollment.enroll(invitation, phoneID: registry.phoneID, phoneName: ThisDevice.displayName, token: new.token, linkKey: new.linkKey) {
+            IPadEnrollment.enroll(invitation, phoneID: registry.phoneID, phoneName: ThisDevice.displayName, token: new.token,
+                                  linkKey: new.linkKey, routerCertificate: routerCertificate) {
                 continuation.resume(returning: $0)
             }
         }

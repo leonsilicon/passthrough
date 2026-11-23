@@ -50,6 +50,17 @@ final class KillSwitchRulesTests: XCTestCase {
     /// The phone dials the Mac's listener; the Mac's replies leave from its
     /// port. They go whether or not the local network is allowed, and nothing
     /// else does: not other ports, not UDP, not other hosts.
+    func testRouterRelayOnlyAllowsTheFixedHotspotEndpoint() throws {
+        let link = try XCTUnwrap(KillSwitchRules.PhoneLink.read(
+            ["phoneLinkRouterRelay": true], portKey: "port", peersKey: "peers"))
+        XCTAssertNil(link.port)
+        let rules = KillSwitchRules.ruleset(.init(phoneLink: link))
+        XCTAssertTrue(rules.contains("pass out quick inet proto tcp to 172.20.10.1 port 17891 no state"))
+        XCTAssertFalse(rules.contains("from any port 17891"))
+        XCTAssertThrowsError(try KillSwitchRules.PhoneLink.read(
+            ["phoneLinkRouterRelay": "yes"], portKey: "port", peersKey: "peers"))
+    }
+
     func testPhoneLinkGoesThroughWithTheLocalNetworkBlocked() {
         let link = KillSwitchRules.PhoneLink(port: 50123, peers: ["172.20.10.1", "2001:db8:5::7"],
                                              subnets: [CIDR("172.20.10.0/28")!, CIDR("fdc2:fc3c:56c:6545::/64")!])

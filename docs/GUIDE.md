@@ -90,6 +90,29 @@ Off by default. Set **Connect over** to **Wireless only** or **Automatic** in th
 * A dropped link resumes: both sides keep the session's connections for up to two minutes while the phone redials, so apps see a pause rather than errors. Traffic is the same SOCKS5 and control streams as over the cable, multiplexed over one TLS connection (see [protocol/README.md](../protocol/README.md)).
 * Android's wireless link (a Wi-Fi Direct group the phone hosts) is not built yet.
 
+### Connect through a travel router
+
+The Beryl can stay in Router mode with its repeater connected to the iPhone's Personal Hotspot. The Mac stays on the Beryl's Wi-Fi and initiates the connection to the iPhone. This path uses the iPhone's IPv4 hotspot gateway.
+
+1. On the iPhone, select **Background** hosting and enable **Connect through a travel router** in Passthrough settings. Allow Local Network access when asked.
+2. For one-time setup, put the iPhone and Mac on the same Wi-Fi network, such as the Beryl's Wi-Fi while the iPhone is not hosting it. Use the fork's [wireless enrollment](#wireless-mac-enrollment) to pair or re-pair the Mac. This exchanges the iPhone's certificate fingerprint over the authenticated pairing connection.
+3. Turn on Personal Hotspot and connect the Beryl's repeater to it. Leave the Mac on the Beryl's Wi-Fi and set Passthrough's connection mode to **Wireless only** or **Automatic**. Select **Connect** when the link appears as **Travel router**.
+
+The VPN extension accepts the Mac on TCP port 17891 at the iPhone's hotspot address. The Mac pins the certificate it received during pairing and proves its existing wireless link key before it can open any streams. Forgetting the Mac ends its relay. Existing wireless pairings keep working and gain this path after re-pairing with the setting enabled.
+
+#### Wireless Mac enrollment
+
+Quit Passthrough on the Mac, then launch the Mac app with the local IP address it has on the shared Wi-Fi network:
+
+```sh
+setup_dir=$(mktemp -d)
+open -a /Applications/Passthrough.app --args \
+  --wireless-enrollment-host "$(ipconfig getifaddr en0)" \
+  --wireless-enrollment-output "$setup_dir/pairing.json"
+```
+
+When the setup window says **Ready**, copy the link with `jq -er '.pairURL' "$setup_dir/pairing.json" | pbcopy`. Open it on the iPhone and tap **Pair and start sharing**. Use the Mac's Wi-Fi interface in the command if it differs from `en0`.
+
 ## iPad
 
 The same app runs on iPad. An iPad does two things with it: it gets its internet from your iPhone, and it is a remote for your Mac. It never carries a Mac's internet.

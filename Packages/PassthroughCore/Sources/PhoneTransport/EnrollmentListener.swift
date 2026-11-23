@@ -94,7 +94,10 @@ public final class EnrollmentListener: @unchecked Sendable {
               let linkKey = m.linkKey.flatMap({ Data(base64Encoded: $0) }), linkKey.count == 32 else {
             return refuse("the pairing details were incomplete")
         }
-        let phone = UpstreamPhone(phoneID: phoneID, name: name, token: token, linkKey: linkKey)
+        let pin = m.routerCertificate.flatMap { value in
+            invitation.kind == .mac && RouterRelay.validFingerprint(value) ? value.lowercased() : nil
+        }
+        let phone = UpstreamPhone(phoneID: phoneID, name: name, token: token, linkKey: linkKey, routerCertificate: pin)
         guard onEnrolled?(phone) == true else { return refuse("this iPad couldn't store the pairing") }
         used = true
         ptLog(.info, "pairing: paired with \(name)")

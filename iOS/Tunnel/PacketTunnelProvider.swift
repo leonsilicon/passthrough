@@ -1,12 +1,14 @@
 import NetworkExtension
 import notify
 import PassthroughCore
+import PhoneTransport
 
 /// Hosts the SOCKS5 server and control channel as a long-lived background
 /// process. The "tunnel" itself routes nothing: a single unreachable /32 keeps
 /// the VPN session valid while the phone's real traffic flows untouched.
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var service: PassthroughService?
+    private var routerRelay: RouterRelay.Server?
     /// On an iPad: "Internet through iPhone" instead of the phone's proxy.
     private var hotspot: HotspotRole?
     private var pairingsToken: Int32?
@@ -50,6 +52,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             do {
                 try service.start()
                 self?.service = service
+                if service.options.routerRelay {
+                    do {
+                        let relay = try RouterRelay.Server(service: service)
+                        try relay.start()
+                        self?.routerRelay = relay
+                    } catch {
+                        ptLog(.error, "Travel router link could not start: \(error.localizedDescription)")
+                    }
+                }
                 self?.drainPackets()
                 ptLog(.info, "Background host started")
                 completionHandler(nil)
@@ -206,16 +217,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             return
         }
+        let relay = routerRelay
+        routerRelay = nil
         // Turned off by the user: tell the Macs and iPads first, and give it a moment to go out.
         if let service, reason == .userInitiated {
             service.sayGoodbye()
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+                relay?.stop()
                 service.stop()
                 completionHandler()
             }
             self.service = nil
             return
         }
+        relay?.stop()
         service?.stop()
         service = nil
         completionHandler()

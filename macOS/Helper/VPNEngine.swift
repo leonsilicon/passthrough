@@ -668,7 +668,9 @@ final class VPNEngine {
             endpoints: endpointPasses,
             localSubnets: config.allowLocalNetwork ? lan : [],
             tailscaleInterfaces: LocalNetworks.tailscaleInterfaces(addresses, excluding: notTailscale),
-            phoneLink: config.phoneLink.map { KillSwitchRules.PhoneLink(port: $0.port, peers: $0.peers, subnets: lan) },
+            phoneLink: config.phoneLink.map {
+                KillSwitchRules.PhoneLink(port: $0.port, peers: $0.peers, subnets: lan, routerRelay: $0.routerRelay)
+            },
             allowIPv6Bypass: vpnInterface != nil && ipv6Bypass))
         guard rules != filterRules else { return }
         do {

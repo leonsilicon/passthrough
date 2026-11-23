@@ -248,6 +248,23 @@ of what the receiver reported consumed, and the receiver sends WINDOW after
 each 64 KiB it consumes. Either side pings every 10 s and drops the connection
 after 30 s without any frame; the phone then redials.
 
+### Travel router link on iPhone
+
+During the fork's Mac enrollment, the iPhone can send its router relay
+certificate fingerprint in the optional `routerCertificate` field. The Mac
+can then dial TCP 17891 on the iPhone's IPv4 Personal Hotspot gateway and pin
+that certificate in TLS 1.3. The iPhone sends `router-challenge` with a fresh
+32-byte nonce. The Mac returns `router-proof` with its `macTag` and
+`mac` (HMAC-SHA256 of `passthrough-router-link-v1` followed by the nonce,
+using the paired wireless link key). After verifying the proof, the phone
+sends `router-ready` with its `phoneID`. These lines use the existing
+newline-delimited JSON framing and encode binary values as base64.
+
+The existing mux then runs with the Mac opening streams and the iPhone
+serving only the control and SOCKS ports. A disconnected Mac redials and
+starts a new mux. Apple devices can continue to use the original wireless
+protocol independently of this path.
+
 ## iPad
 
 An iPad can use an iPhone's internet while it is on that iPhone's Personal

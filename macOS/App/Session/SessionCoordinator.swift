@@ -252,13 +252,16 @@ final class SessionCoordinator: ObservableObject {
     /// once one is linked (none yet: it must be able to dial in). Not while
     /// the cable carries passthrough, or the listener is off.
     private func syncPhoneLink() {
-        guard let port = wirelessWatcher.listenerPort, device?.medium != .usb else { vpnLayer.phoneLink = nil; return }
+        guard device?.medium != .usb else { vpnLayer.phoneLink = nil; return }
+        let port = wirelessWatcher.listenerPort
+        let routerRelay = connectionMode != .cable && links.phones.contains { $0.routerCertificate != nil }
+        guard port != nil || routerRelay else { vpnLayer.phoneLink = nil; return }
         var peers: [String] = []
         if let device, device.id.hasPrefix("wifi:"), let host = wirelessWatcher.peers[String(device.id.dropFirst(5))],
            let peer = PeerAddress.numeric(host) {
             peers = [peer]
         }
-        vpnLayer.phoneLink = HelperClient.PhoneLink(port: port, peers: peers)
+        vpnLayer.phoneLink = HelperClient.PhoneLink(port: port, peers: peers, routerRelay: routerRelay)
     }
 
     /// "iPhone" or "Android phone" for the attached device; "phone" when none.
@@ -408,11 +411,13 @@ final class SessionCoordinator: ObservableObject {
                 guard Keychain.write(phone.token, account: slot),
                       Keychain.write(phone.linkKey.base64EncodedString(), account: "link." + slot),
                       links.record(WirelessPhone(phoneID: phone.phoneID, linkKey: phone.linkKey,
-                                                 isAndroid: false, label: phone.name, pairingSlot: slot)) else { return false }
+                                                 isAndroid: false, label: phone.name, pairingSlot: slot,
+                                                 routerCertificate: phone.routerCertificate)) else { return false }
                 Self.writeWirelessEnrollmentStatus(["state": "paired", "phoneName": phone.name], to: output)
                 Task { @MainActor in
                     self?.connectionMode = .wireless
                     self?.pairingError = nil
+                    self?.syncPhoneLink()
                     self?.wirelessEnrollmentStatus = "Paired with \(phone.name)"
                 }
                 return true

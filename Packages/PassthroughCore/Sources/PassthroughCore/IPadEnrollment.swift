@@ -90,11 +90,12 @@ public enum IPadEnrollment {
         public var name: String?
         public var token: String?
         public var linkKey: String?
+        public var routerCertificate: String?
         public var error: String?
         public init(t: String, nonce: String? = nil, mac: String? = nil, phoneID: String? = nil, name: String? = nil,
-                    token: String? = nil, linkKey: String? = nil, error: String? = nil) {
+                    token: String? = nil, linkKey: String? = nil, routerCertificate: String? = nil, error: String? = nil) {
             self.t = t; self.nonce = nonce; self.mac = mac; self.phoneID = phoneID; self.name = name
-            self.token = token; self.linkKey = linkKey; self.error = error
+            self.token = token; self.linkKey = linkKey; self.routerCertificate = routerCertificate; self.error = error
         }
     }
 
@@ -141,7 +142,7 @@ public enum IPadEnrollment {
     public static let exchangeTimeout: TimeInterval = 15
 
     public static func enroll(_ invitation: Invitation, phoneID: String, phoneName: String, token: String, linkKey: Data,
-                              timeout: TimeInterval = 20, queue: DispatchQueue = .main,
+                              routerCertificate: String? = nil, timeout: TimeInterval = 20, queue: DispatchQueue = .main,
                               completion: @escaping @Sendable (Result<Void, EnrollmentError>) -> Void) {
         guard !invitation.isExpired else { queue.async { completion(.failure(.expired)) }; return }
         let work = DispatchQueue(label: "\(PassthroughProtocol.identifier).enroll")
@@ -161,7 +162,7 @@ public enum IPadEnrollment {
                 }
                 let mac = proof(secret: invitation.secret, nonce: nonce).base64EncodedString()
                 send(Message(t: "enroll", mac: mac, phoneID: phoneID, name: phoneName, token: token,
-                             linkKey: linkKey.base64EncodedString()), on: stream)
+                             linkKey: linkKey.base64EncodedString(), routerCertificate: routerCertificate), on: stream)
                 read(stream) { result in
                     switch result {
                     case .success(let answer) where answer.t == "enrolled": state.finish(.success(()))

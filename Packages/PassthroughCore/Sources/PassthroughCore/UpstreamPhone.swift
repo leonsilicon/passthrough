@@ -12,9 +12,13 @@ public struct UpstreamPhone: Codable, Equatable, Sendable {
     /// The wireless link key the iPhone proves itself with.
     public var linkKey: Data
     public var pairedAt: Date
+    /// Opt-in TLS pin for the Mac-initiated link. Absent for existing pairings and iPads.
+    public var routerCertificate: String?
 
-    public init(phoneID: String, name: String, token: String, linkKey: Data, pairedAt: Date = Date()) {
+    public init(phoneID: String, name: String, token: String, linkKey: Data, pairedAt: Date = Date(),
+                routerCertificate: String? = nil) {
         self.phoneID = phoneID; self.name = name; self.token = token; self.linkKey = linkKey; self.pairedAt = pairedAt
+        self.routerCertificate = routerCertificate
     }
 }
 

@@ -248,6 +248,15 @@ of what the receiver reported consumed, and the receiver sends WINDOW after
 each 64 KiB it consumes. Either side pings every 10 s and drops the connection
 after 30 s without any frame; the phone then redials.
 
+### Travel router link on iPhone
+
+The iPhone can reach a selected paired Mac through a router's Personal Hotspot
+IPv4 address on TCP port 17891. The router forwards that port to the Mac's
+wireless listener. The iPhone binds the outgoing socket to its hotspot address
+and uses the forwarded endpoint when the paired Mac isn't visible over
+Bonjour. The TLS pin, link-key challenge, mux framing and resume protocol are
+the same as on the original wireless link.
+
 ## iPad
 
 An iPad can use an iPhone's internet while it is on that iPhone's Personal

@@ -294,6 +294,7 @@ public final class WirelessDialer: @unchecked Sendable {
     private let allowedPorts: Set<UInt16>
     private let direct: [UInt16: DirectServer]
     private let peerToPeer: Bool
+    private let forwardedMac: (tag: String, endpoint: NWEndpoint, source: NWEndpoint.Host?)?
     private var browser: NWBrowser?
     private var results: Set<NWBrowser.Result> = []
     private var links: [String: MacLink] = [:]   // by macTag
@@ -306,10 +307,12 @@ public final class WirelessDialer: @unchecked Sendable {
     /// Without `peerToPeer` the Mac is found only on a network both share,
     /// typically this iPhone's Personal Hotspot.
     public init(allowedPorts: Set<UInt16>, peerToPeer: Bool = false, direct: [UInt16: DirectServer] = [:],
+                forwardedMac: (tag: String, endpoint: NWEndpoint, source: NWEndpoint.Host?)? = nil,
                 credentials: @escaping @Sendable () -> [LinkCredential]) {
         self.allowedPorts = allowedPorts
         self.direct = direct
         self.peerToPeer = peerToPeer
+        self.forwardedMac = forwardedMac
         self.credentials = credentials
     }
 
@@ -335,6 +338,7 @@ public final class WirelessDialer: @unchecked Sendable {
             browser.browseResultsChangedHandler = { [weak self] results, _ in self?.queue.async { self?.found(results) } }
             browser.start(queue: queue)
             self.browser = browser
+            if forwardedMac != nil { found([]) }
             ptLog(.info, "wireless: looking for linked Macs \(peerToPeer ? "nearby and on shared networks" : "on shared networks (Personal Hotspot)")")
         }
     }
@@ -389,6 +393,14 @@ public final class WirelessDialer: @unchecked Sendable {
                 self?.credential(for: tag)
             }.reach(result.endpoint, over: interface)
         }
+        if let forwardedMac, !inView.contains(forwardedMac.tag),
+           known.contains(forwardedMac.tag), !hotspotOnly.contains(forwardedMac.tag) {
+            let tag = forwardedMac.tag
+            inView.insert(tag)
+            link(for: tag, peerToPeer: false) { [weak self] in
+                self?.credential(for: tag)
+            }.reach(forwardedMac.endpoint, from: forwardedMac.source)
+        }
         for (tag, link) in links where !inView.contains(tag) { link.outOfView() }
     }
 
@@ -420,6 +432,7 @@ private final class MacLink: @unchecked Sendable {
     private let queue: DispatchQueue
     private var endpoint: NWEndpoint?
     private var interface: NWInterface?
+    private var sourceAddress: NWEndpoint.Host?
     /// Advertising right now; a Mac out of view is redialed only to resume.
     private var inView = true
     private var mux: Mux?
@@ -447,9 +460,10 @@ private final class MacLink: @unchecked Sendable {
     private var tag: String { String(macTag.prefix(6)) }
 
     /// The Mac is (still) at `endpoint`: connect unless already up or trying.
-    func reach(_ endpoint: NWEndpoint, over interface: NWInterface? = nil) {
+    func reach(_ endpoint: NWEndpoint, over interface: NWInterface? = nil, from source: NWEndpoint.Host? = nil) {
         self.endpoint = endpoint
         self.interface = interface
+        self.sourceAddress = source
         inView = true
         guard !stopped, !isUp, attempt == nil, redial == nil else { return }
         dial()
@@ -484,6 +498,7 @@ private final class MacLink: @unchecked Sendable {
         let id = attemptID
         let params = WirelessLink.pinnedClientParameters(pin: credential.certSHA256, peerToPeer: peerToPeer)
         if hotspotOnly, let interface { params.requiredInterface = interface }
+        if let sourceAddress { params.requiredLocalEndpoint = .hostPort(host: sourceAddress, port: .any) }
         let connection = NWConnection(to: endpoint, using: params)
         let stream = ConnectionStream(connection, queue: queue)
         attempt = stream

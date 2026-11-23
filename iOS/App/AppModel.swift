@@ -74,6 +74,11 @@ final class AppModel: ObservableObject {
     @AppStorage(SharedKeys.controlPort, store: AppModel.groupDefaults) var controlPort = Int(PassthroughProtocol.defaultControlPort)
     @AppStorage(SharedKeys.wireless, store: AppModel.groupDefaults) var wireless = false
     @AppStorage(SharedKeys.peerToPeer, store: AppModel.groupDefaults) var peerToPeer = false
+    @AppStorage("travelRouterAddress", store: AppModel.groupDefaults) private var travelRouterAddress = ""
+    @AppStorage("travelRouterMac", store: AppModel.groupDefaults) private var travelRouterMac = ""
+    var travelRouter: TravelRouterLink? {
+        TravelRouterLink(address: travelRouterAddress, macClientID: travelRouterMac)
+    }
     @AppStorage("hosting", store: AppModel.groupDefaults) var hostingRaw = Hosting.background.rawValue
     var hosting: Hosting {
         get { Hosting(rawValue: hostingRaw) ?? .background }
@@ -182,6 +187,7 @@ final class AppModel: ObservableObject {
         options.allowUDP = allowUDP
         options.wireless = wireless
         options.peerToPeer = peerToPeer
+        options.travelRouter = wireless && !ThisDevice.isPad ? travelRouter : nil
         let host = activeHost
         Task {
             do {
@@ -198,6 +204,14 @@ final class AppModel: ObservableObject {
         state = .stopping
         let host = activeHost
         Task { await host.stop() }
+    }
+
+    func setTravelRouter(_ link: TravelRouterLink?) {
+        guard link != travelRouter else { return }
+        objectWillChange.send()
+        travelRouterAddress = link?.address ?? ""
+        travelRouterMac = link?.macClientID ?? ""
+        restartIfRunning()
     }
 
     /// Applies a setting that only takes effect at start: restarts a running proxy.

@@ -20,6 +20,7 @@ public final class WirelessListener: @unchecked Sendable {
     private let macTag: String
     private let advertise: Bool
     private let peerToPeer: Bool
+    private let travelRouter: Bool
     private let linkKey: @Sendable (String) -> Data?
     private let queue = DispatchQueue(label: "\(PassthroughProtocol.identifier).wireless-listener")
     private var listener: NWListener?
@@ -43,13 +44,14 @@ public final class WirelessListener: @unchecked Sendable {
     /// `linkKey` returns the key shared with the phone of that ID, if linked.
     /// `advertise` is false in tests (no Bonjour). `provenAddresses` keeps
     /// the addresses that proved themselves across launches (`HandshakeLimiter`).
-    public init(identity: MacIdentity, macTag: String, advertise: Bool = true, peerToPeer: Bool = false,
+    public init(identity: MacIdentity, macTag: String, advertise: Bool = true, peerToPeer: Bool = false, travelRouter: Bool = false,
                 provenAddresses: ProvenAddressStore = MemoryProvenAddressStore(),
                 linkKey: @escaping @Sendable (String) -> Data?) {
         self.identity = identity
         self.macTag = macTag
         self.advertise = advertise
         self.peerToPeer = peerToPeer
+        self.travelRouter = travelRouter
         self.provenAddresses = provenAddresses
         self.linkKey = linkKey
     }
@@ -57,7 +59,9 @@ public final class WirelessListener: @unchecked Sendable {
     public func start(onReady: (@Sendable (UInt16) -> Void)? = nil) throws {
         let params = try identity.tlsListenerParameters()
         params.includePeerToPeer = peerToPeer
-        let listener = try NWListener(using: params)
+        let port = travelRouter ? NWEndpoint.Port(rawValue: TravelRouterLink.port)! : .any
+        if travelRouter { params.requiredInterfaceType = .wifi }
+        let listener = try NWListener(using: params, on: port)
         if advertise {
             let txt = NWTXTRecord(["m": macTag])
             listener.service = NWListener.Service(name: macTag, type: WirelessLink.serviceType, txtRecord: txt)

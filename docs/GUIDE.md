@@ -90,6 +90,31 @@ Off by default. Set **Connect over** to **Wireless only** or **Automatic** in th
 * A dropped link resumes: both sides keep the session's connections for up to two minutes while the phone redials, so apps see a pause rather than errors. Traffic is the same SOCKS5 and control streams as over the cable, multiplexed over one TLS connection (see [protocol/README.md](../protocol/README.md)).
 * Android's wireless link (a Wi-Fi Direct group the phone hosts) is not built yet.
 
+### Connect through a travel router
+
+Keep the Beryl in **Router** mode and use its repeater to join the iPhone's Personal Hotspot. Passthrough uses an IPv4 hotspot address and a scoped port forward for the iPhone's existing background connection to the Mac.
+
+1. Pair the Mac with the iPhone once on shared Wi-Fi. Your fork's [wireless enrollment](#wireless-mac-enrollment) works while both devices are on the Beryl's Wi-Fi and the iPhone is not hosting the hotspot.
+2. In Passthrough on the Mac, open **Settings → General**. Select **Wireless only** or **Automatic**, then enable **Listen for a travel router**.
+3. Turn on Personal Hotspot and connect the Beryl's repeater to it. On the Beryl's **Internet** page, copy the Repeater IPv4 address (`172.20.10.x`). The Mac can stay on the Beryl's Wi-Fi.
+4. Reserve the Mac's LAN IP on the Beryl. In [LuCI](https://docs.gl-inet.com/router/en/4/interface_guide/advanced_settings/), add a **Network → Firewall → Port Forwards** rule for TCP port `17891` from WAN to the Mac's LAN IP, also on port `17891`. In the rule's advanced settings, limit **Source IP address** to `172.20.10.1` so only the iPhone can use the rule.
+5. In Passthrough on the iPhone, select **Background** hosting and enable **Wireless link**. Under **Travel router**, select the linked Mac, enter the Repeater IPv4 address, then save and start sharing. On the Mac, turn on **Internet through this phone** when the phone is reachable.
+
+If the Beryl's Repeater address changes, update it on the iPhone. If you also use the Beryl on other uplinks, disable the forward when the iPhone is not the upstream connection. Passthrough can reconnect over the forwarded path using its existing TLS pin, pairing key and stream resume.
+
+#### Wireless Mac enrollment
+
+Quit Passthrough on the Mac, then launch it with the Mac's local IP address on the shared Wi-Fi network.
+
+```sh
+setup_dir=$(mktemp -d)
+open -a /Applications/Passthrough.app --args \
+  --wireless-enrollment-host "$(ipconfig getifaddr en0)" \
+  --wireless-enrollment-output "$setup_dir/pairing.json"
+```
+
+When the setup window says **Ready**, copy the link with `jq -er '.pairURL' "$setup_dir/pairing.json" | pbcopy`. Open it on the iPhone and tap **Pair and start sharing**. Use the Mac's Wi-Fi interface in the command if it differs from `en0`.
+
 ## iPad
 
 The same app runs on iPad. An iPad does two things with it: it gets its internet from your iPhone, and it is a remote for your Mac. It never carries a Mac's internet.

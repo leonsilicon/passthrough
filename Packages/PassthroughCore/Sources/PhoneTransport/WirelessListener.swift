@@ -59,9 +59,13 @@ public final class WirelessListener: @unchecked Sendable {
     public func start(onReady: (@Sendable (UInt16) -> Void)? = nil) throws {
         let params = try identity.tlsListenerParameters()
         params.includePeerToPeer = peerToPeer
-        let port = travelRouter ? NWEndpoint.Port(rawValue: TravelRouterLink.port)! : .any
-        if travelRouter { params.requiredInterfaceType = .wifi }
-        let listener = try NWListener(using: params, on: port)
+        let listener: NWListener
+        if travelRouter {
+            params.requiredInterfaceType = .wifi
+            listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: TravelRouterLink.port)!)
+        } else {
+            listener = try NWListener(using: params)
+        }
         if advertise {
             let txt = NWTXTRecord(["m": macTag])
             listener.service = NWListener.Service(name: macTag, type: WirelessLink.serviceType, txtRecord: txt)
